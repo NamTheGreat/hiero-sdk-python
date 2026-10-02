@@ -10,6 +10,7 @@ from hiero_sdk_python.crypto.key import Key
 from hiero_sdk_python.crypto.key_list import KeyList
 from hiero_sdk_python.executable import _Method
 from hiero_sdk_python.file.file_id import FileId
+from hiero_sdk_python.hapi.services import basic_types_pb2, transaction_pb2
 from hiero_sdk_python.hapi.services.file_update_pb2 import FileUpdateTransactionBody
 from hiero_sdk_python.hapi.services.schedulable_transaction_body_pb2 import (
     SchedulableTransactionBody,
@@ -193,3 +194,54 @@ class FileUpdateTransaction(Transaction):
             _Method: An object containing the transaction function to update a file.
         """
         return _Method(transaction_func=channel.file.updateFile, query_func=None)
+
+    def _from_proto(self, proto: FileUpdateTransactionBody) -> FileUpdateTransaction:
+        """
+        Initializes a new FileUpdateTransaction instance from a protobuf object.
+
+        Args:
+            proto (FileUpdateTransactionBody): The protobuf object to initialize from.
+
+        Returns:
+            FileUpdateTransaction: This transaction instance.
+        """
+        self.file_id = FileId._from_proto(proto.fileID) if proto.HasField("fileID") else None
+        self.keys = KeyList.from_proto(proto.keys).keys if proto.HasField("keys") else None
+        self.contents = proto.contents if proto.contents else None
+        self.expiration_time = (
+            Timestamp._from_protobuf(proto.expirationTime) if proto.HasField("expirationTime") else None
+        )
+        self.file_memo = proto.memo.value if proto.HasField("memo") else None
+        return self
+
+    @classmethod
+    def _from_protobuf(
+        cls,
+        transaction_body: transaction_pb2.TransactionBody,
+        body_bytes: bytes,
+        sig_map: basic_types_pb2.SignatureMap | None = None,
+    ) -> FileUpdateTransaction:
+        """
+        Creates a FileUpdateTransaction instance from protobuf components.
+
+        Args:
+            transaction_body (TransactionBody): The parsed TransactionBody protobuf.
+            body_bytes (bytes): The raw bytes of the transaction body.
+            sig_map (SignatureMap, optional): The SignatureMap protobuf containing signatures.
+
+        Returns:
+            FileUpdateTransaction: A new transaction instance with all fields restored.
+        """
+        transaction = super()._from_protobuf(transaction_body, body_bytes, sig_map)
+
+        if transaction_body.HasField("fileUpdate"):
+            pb = transaction_body.fileUpdate
+            transaction.file_id = FileId._from_proto(pb.fileID) if pb.HasField("fileID") else None
+            transaction.keys = KeyList.from_proto(pb.keys).keys if pb.HasField("keys") else None
+            transaction.contents = pb.contents if pb.contents else None
+            transaction.expiration_time = (
+                Timestamp._from_protobuf(pb.expirationTime) if pb.HasField("expirationTime") else None
+            )
+            transaction.file_memo = pb.memo.value if pb.HasField("memo") else None
+
+        return transaction

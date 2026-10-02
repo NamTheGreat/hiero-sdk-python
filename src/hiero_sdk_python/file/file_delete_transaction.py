@@ -5,6 +5,7 @@ from __future__ import annotations
 from hiero_sdk_python.channels import _Channel
 from hiero_sdk_python.executable import _Method
 from hiero_sdk_python.file.file_id import FileId
+from hiero_sdk_python.hapi.services import basic_types_pb2, transaction_pb2
 from hiero_sdk_python.hapi.services.file_delete_pb2 import FileDeleteTransactionBody
 from hiero_sdk_python.hapi.services.schedulable_transaction_body_pb2 import (
     SchedulableTransactionBody,
@@ -89,3 +90,42 @@ class FileDeleteTransaction(Transaction):
             _Method: An object containing the transaction function to delete a file.
         """
         return _Method(transaction_func=channel.file.deleteFile, query_func=None)
+
+    def _from_proto(self, proto: FileDeleteTransactionBody) -> FileDeleteTransaction:
+        """
+        Initializes a new FileDeleteTransaction instance from a protobuf object.
+
+        Args:
+            proto (FileDeleteTransactionBody): The protobuf object to initialize from.
+
+        Returns:
+            FileDeleteTransaction: This transaction instance.
+        """
+        self.file_id = FileId._from_proto(proto.fileID) if proto.HasField("fileID") else None
+        return self
+
+    @classmethod
+    def _from_protobuf(
+        cls,
+        transaction_body: transaction_pb2.TransactionBody,
+        body_bytes: bytes,
+        sig_map: basic_types_pb2.SignatureMap | None = None,
+    ) -> FileDeleteTransaction:
+        """
+        Creates a FileDeleteTransaction instance from protobuf components.
+
+        Args:
+            transaction_body (TransactionBody): The parsed TransactionBody protobuf.
+            body_bytes (bytes): The raw bytes of the transaction body.
+            sig_map (SignatureMap, optional): The SignatureMap protobuf containing signatures.
+
+        Returns:
+            FileDeleteTransaction: A new transaction instance with all fields restored.
+        """
+        transaction = super()._from_protobuf(transaction_body, body_bytes, sig_map)
+
+        if transaction_body.HasField("fileDelete"):
+            pb = transaction_body.fileDelete
+            transaction.file_id = FileId._from_proto(pb.fileID) if pb.HasField("fileID") else None
+
+        return transaction

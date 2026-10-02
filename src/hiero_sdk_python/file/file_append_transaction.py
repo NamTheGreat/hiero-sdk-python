@@ -17,7 +17,11 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from hiero_sdk_python.file.file_id import FileId
-from hiero_sdk_python.hapi.services import file_append_pb2
+from hiero_sdk_python.hapi.services import (
+    basic_types_pb2,
+    file_append_pb2,
+    transaction_pb2,
+)
 from hiero_sdk_python.hapi.services.schedulable_transaction_body_pb2 import SchedulableTransactionBody
 from hiero_sdk_python.hbar import Hbar
 from hiero_sdk_python.schedule.schedule_create_transaction import ScheduleCreateTransaction
@@ -204,7 +208,35 @@ class FileAppendTransaction(ChunkedTransaction):
         Returns:
             FileAppendTransaction: This transaction instance.
         """
-        self.file_id = FileId._from_proto(proto.fileID) if proto.fileID else None
-        self.contents = proto.contents
+        self.file_id = FileId._from_proto(proto.fileID) if proto.HasField("fileID") else None
+        self.contents = proto.contents if proto.contents else None
         self._total_chunks = self._calculate_total_chunks()
         return self
+
+    @classmethod
+    def _from_protobuf(
+        cls,
+        transaction_body: transaction_pb2.TransactionBody,
+        body_bytes: bytes,
+        sig_map: basic_types_pb2.SignatureMap | None = None,
+    ) -> FileAppendTransaction:
+        """
+        Creates a FileAppendTransaction instance from protobuf components.
+
+        Args:
+            transaction_body (TransactionBody): The parsed TransactionBody protobuf.
+            body_bytes (bytes): The raw bytes of the transaction body.
+            sig_map (SignatureMap, optional): The SignatureMap protobuf containing signatures.
+
+        Returns:
+            FileAppendTransaction: A new transaction instance with all fields restored.
+        """
+        transaction = super()._from_protobuf(transaction_body, body_bytes, sig_map)
+
+        if transaction_body.HasField("fileAppend"):
+            pb = transaction_body.fileAppend
+            transaction.file_id = FileId._from_proto(pb.fileID) if pb.HasField("fileID") else None
+            transaction.contents = pb.contents if pb.contents else None
+            transaction._total_chunks = transaction._calculate_total_chunks()
+
+        return transaction

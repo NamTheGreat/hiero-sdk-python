@@ -9,6 +9,7 @@ from hiero_sdk_python.exceptions import PrecheckError, ReceiptStatusError
 from hiero_sdk_python.file.file_append_transaction import FileAppendTransaction
 from hiero_sdk_python.file.file_id import FileId
 from hiero_sdk_python.hapi.services import (
+    file_append_pb2,
     response_header_pb2,
     response_pb2,
     timestamp_pb2,
@@ -553,3 +554,107 @@ def test_set_contents_accepts_bytearray():
 
     assert file_tx.contents == b"buffered content"
     assert isinstance(file_tx.contents, bytes)
+
+
+def test_file_append_round_trip_from_bytes_all_fields(mock_account_ids, file_id):
+    """Test FileAppendTransaction to_bytes() and Transaction.from_bytes() round trip with all fields set."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+    contents = b"Round-trip append content"
+
+    tx = FileAppendTransaction(file_id=file_id, contents=contents)
+    tx.set_transaction_id(tx_id)
+    tx.set_node_account_ids([node_account_id])
+    tx.set_transaction_memo("Append memo")
+
+    tx.freeze()
+    tx_bytes = tx.to_bytes()
+
+    restored = Transaction.from_bytes(tx_bytes)
+
+    assert isinstance(restored, FileAppendTransaction)
+    assert restored.memo == "Append memo"
+    assert restored.file_id == file_id
+    assert restored.contents == contents
+    assert restored._total_chunks == 1
+    assert restored._transaction_body_bytes
+
+
+def test_file_append_round_trip_from_bytes_unset_contents(mock_account_ids, file_id):
+    """Test FileAppendTransaction to_bytes() and Transaction.from_bytes() round trip with unset contents."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    tx = FileAppendTransaction(file_id=file_id)
+    tx.set_transaction_id(tx_id)
+    tx.set_node_account_ids([node_account_id])
+
+    tx.freeze()
+    tx_bytes = tx.to_bytes()
+
+    restored = Transaction.from_bytes(tx_bytes)
+
+    assert isinstance(restored, FileAppendTransaction)
+    assert restored.file_id == file_id
+    assert restored.contents is None
+    assert restored._total_chunks == 1
+    assert restored._transaction_body_bytes
+
+
+def test_file_append_round_trip_from_bytes_multi_chunk(mock_account_ids, file_id):
+    """Test FileAppendTransaction to_bytes() and Transaction.from_bytes() round trip with chunking."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+    contents = b"0123456789" * 5
+
+    tx = FileAppendTransaction(file_id=file_id, contents=contents, chunk_size=10)
+    tx.set_transaction_id(tx_id)
+    tx.set_node_account_ids([node_account_id])
+
+    tx.freeze()
+    tx_bytes = tx.to_bytes()
+
+    restored = Transaction.from_bytes(tx_bytes)
+
+    assert isinstance(restored, FileAppendTransaction)
+    assert restored.file_id == file_id
+    # First chunk content is restored from current serialized transaction chunk
+    assert restored.contents == b"0123456789"
+
+
+def test_file_append_from_protobuf_unset_optionals(mock_account_ids):
+    """Test FileAppendTransaction._from_protobuf with unset optional fields."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    body = transaction_pb2.TransactionBody(
+        transactionID=tx_id._to_proto(),
+        nodeAccountID=node_account_id._to_proto(),
+        fileAppend=file_append_pb2.FileAppendTransactionBody(),
+    )
+    body_bytes = body.SerializeToString()
+
+    restored = FileAppendTransaction._from_protobuf(body, body_bytes, None)
+
+    assert isinstance(restored, FileAppendTransaction)
+    assert restored.file_id is None
+    assert restored.contents is None
+    assert restored._total_chunks == 1
+
+
+def test_file_append_from_proto_method(file_id):
+    """Test FileAppendTransaction._from_proto method directly."""
+    proto = file_append_pb2.FileAppendTransactionBody(
+        fileID=file_id._to_proto(),
+        contents=b"Direct proto append",
+    )
+    tx = FileAppendTransaction()._from_proto(proto)
+    assert tx.file_id == file_id
+    assert tx.contents == b"Direct proto append"
+    assert tx._total_chunks == 1
+
+    empty_proto = file_append_pb2.FileAppendTransactionBody()
+    empty_tx = FileAppendTransaction()._from_proto(empty_proto)
+    assert empty_tx.file_id is None
+    assert empty_tx.contents is None
+    assert empty_tx._total_chunks == 1

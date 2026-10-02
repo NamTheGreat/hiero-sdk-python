@@ -6,7 +6,11 @@ from hiero_sdk_python.channels import _Channel
 from hiero_sdk_python.crypto.key import Key
 from hiero_sdk_python.crypto.key_list import KeyList
 from hiero_sdk_python.executable import _Method
-from hiero_sdk_python.hapi.services import file_create_pb2
+from hiero_sdk_python.hapi.services import (
+    basic_types_pb2,
+    file_create_pb2,
+    transaction_pb2,
+)
 from hiero_sdk_python.hapi.services.schedulable_transaction_body_pb2 import (
     SchedulableTransactionBody,
 )
@@ -179,8 +183,41 @@ class FileCreateTransaction(Transaction):
         Returns:
             FileCreateTransaction: This transaction instance.
         """
-        self.keys = KeyList.from_proto(proto.keys).keys
+        self.keys = KeyList.from_proto(proto.keys).keys if proto.HasField("keys") else []
         self.contents = proto.contents
-        self.expiration_time = Timestamp._from_protobuf(proto.expirationTime) if proto.expirationTime else None
+        self.expiration_time = (
+            Timestamp._from_protobuf(proto.expirationTime) if proto.HasField("expirationTime") else None
+        )
         self.file_memo = proto.memo
         return self
+
+    @classmethod
+    def _from_protobuf(
+        cls,
+        transaction_body: transaction_pb2.TransactionBody,
+        body_bytes: bytes,
+        sig_map: basic_types_pb2.SignatureMap | None = None,
+    ) -> FileCreateTransaction:
+        """
+        Creates a FileCreateTransaction instance from protobuf components.
+
+        Args:
+            transaction_body (TransactionBody): The parsed TransactionBody protobuf.
+            body_bytes (bytes): The raw bytes of the transaction body.
+            sig_map (SignatureMap, optional): The SignatureMap protobuf containing signatures.
+
+        Returns:
+            FileCreateTransaction: A new transaction instance with all fields restored.
+        """
+        transaction = super()._from_protobuf(transaction_body, body_bytes, sig_map)
+
+        if transaction_body.HasField("fileCreate"):
+            pb = transaction_body.fileCreate
+            transaction.keys = KeyList.from_proto(pb.keys).keys if pb.HasField("keys") else []
+            transaction.contents = pb.contents
+            transaction.expiration_time = (
+                Timestamp._from_protobuf(pb.expirationTime) if pb.HasField("expirationTime") else None
+            )
+            transaction.file_memo = pb.memo
+
+        return transaction
