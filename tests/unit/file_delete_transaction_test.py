@@ -9,9 +9,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from hiero_sdk_python.file.file_delete_transaction import FileDeleteTransaction
+from hiero_sdk_python.hapi.services import transaction_pb2
+from hiero_sdk_python.hapi.services.file_delete_pb2 import FileDeleteTransactionBody
 from hiero_sdk_python.hapi.services.schedulable_transaction_body_pb2 import (
     SchedulableTransactionBody,
 )
+from hiero_sdk_python.transaction.transaction import Transaction
+from hiero_sdk_python.transaction.transaction_id import TransactionId
 
 
 pytestmark = pytest.mark.unit
@@ -136,3 +140,72 @@ def test_get_method():
 
     assert method.query is None
     assert method.transaction == mock_file_stub.deleteFile
+
+
+def test_file_delete_round_trip_from_bytes(mock_account_ids, file_id):
+    """Test FileDeleteTransaction to_bytes() and Transaction.from_bytes() round trip with file_id."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    tx = FileDeleteTransaction(file_id=file_id)
+    tx.set_transaction_id(tx_id)
+    tx.set_node_account_ids([node_account_id])
+    tx.set_transaction_memo("Delete file memo")
+
+    tx.freeze()
+    tx_bytes = tx.to_bytes()
+
+    restored = Transaction.from_bytes(tx_bytes)
+
+    assert isinstance(restored, FileDeleteTransaction)
+    assert restored.memo == "Delete file memo"
+    assert restored.file_id == file_id
+    assert restored._transaction_body_bytes
+
+
+def test_file_delete_round_trip_from_bytes_no_file_id(mock_account_ids):
+    """Test FileDeleteTransaction to_bytes() and Transaction.from_bytes() round trip without file_id."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    tx = FileDeleteTransaction()
+    tx.set_transaction_id(tx_id)
+    tx.set_node_account_ids([node_account_id])
+
+    tx.freeze()
+    tx_bytes = tx.to_bytes()
+
+    restored = Transaction.from_bytes(tx_bytes)
+
+    assert isinstance(restored, FileDeleteTransaction)
+    assert restored.file_id is None
+    assert restored._transaction_body_bytes
+
+
+def test_file_delete_from_protobuf_unset_optionals(mock_account_ids):
+    """Test FileDeleteTransaction._from_protobuf with unset optional fields."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    body = transaction_pb2.TransactionBody(
+        transactionID=tx_id._to_proto(),
+        nodeAccountID=node_account_id._to_proto(),
+        fileDelete=FileDeleteTransactionBody(),
+    )
+    body_bytes = body.SerializeToString()
+
+    restored = FileDeleteTransaction._from_protobuf(body, body_bytes, None)
+
+    assert isinstance(restored, FileDeleteTransaction)
+    assert restored.file_id is None
+
+
+def test_file_delete_from_proto_method(file_id):
+    """Test FileDeleteTransaction._from_proto method directly."""
+    proto = FileDeleteTransactionBody(fileID=file_id._to_proto())
+    tx = FileDeleteTransaction()._from_proto(proto)
+    assert tx.file_id == file_id
+
+    empty_proto = FileDeleteTransactionBody()
+    empty_tx = FileDeleteTransaction()._from_proto(empty_proto)
+    assert empty_tx.file_id is None

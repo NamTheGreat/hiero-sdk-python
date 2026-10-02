@@ -14,6 +14,7 @@ from hiero_sdk_python.hapi.services import (
     response_header_pb2,
     response_pb2,
     transaction_get_receipt_pb2,
+    transaction_pb2,
 )
 from hiero_sdk_python.hapi.services.schedulable_transaction_body_pb2 import (
     SchedulableTransactionBody,
@@ -27,6 +28,8 @@ from hiero_sdk_python.hapi.services.transaction_response_pb2 import (
 from hiero_sdk_python.hbar import Hbar
 from hiero_sdk_python.response_code import ResponseCode
 from hiero_sdk_python.timestamp import Timestamp
+from hiero_sdk_python.transaction.transaction import Transaction
+from hiero_sdk_python.transaction.transaction_id import TransactionId
 from tests.unit.mock_server import mock_hedera_servers
 
 
@@ -354,3 +357,114 @@ def test_set_contents_accepts_bytearray():
 
     assert file_tx.contents == b"buffered content"
     assert isinstance(file_tx.contents, bytes)
+
+
+def test_file_create_round_trip_from_bytes_all_fields(mock_account_ids):
+    """Test FileCreateTransaction to_bytes() and Transaction.from_bytes() round trip with all fields set."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+    public_key = PrivateKey.generate().public_key()
+    expiration_time = Timestamp(1800000000, 123456)
+    contents = b"Round-trip file contents"
+    file_memo = "Round-trip file memo"
+
+    tx = FileCreateTransaction(
+        keys=[public_key],
+        contents=contents,
+        expiration_time=expiration_time,
+        file_memo=file_memo,
+    )
+    tx.set_transaction_id(tx_id)
+    tx.set_node_account_ids([node_account_id])
+    tx.set_transaction_memo("Base tx memo")
+
+    tx.freeze()
+    tx_bytes = tx.to_bytes()
+
+    restored = Transaction.from_bytes(tx_bytes)
+
+    assert isinstance(restored, FileCreateTransaction)
+    assert restored.memo == "Base tx memo"
+    assert len(restored.keys) == 1
+    assert restored.keys[0].to_proto_key() == public_key.to_proto_key()
+    assert restored.contents == contents
+    assert restored.expiration_time == expiration_time
+    assert restored.file_memo == file_memo
+    assert restored._transaction_body_bytes
+
+
+def test_file_create_round_trip_from_bytes_defaults(mock_account_ids):
+    """Test FileCreateTransaction to_bytes() and Transaction.from_bytes() round trip with default values."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    tx = FileCreateTransaction()
+    tx.set_transaction_id(tx_id)
+    tx.set_node_account_ids([node_account_id])
+
+    tx.freeze()
+    tx_bytes = tx.to_bytes()
+
+    restored = Transaction.from_bytes(tx_bytes)
+
+    assert isinstance(restored, FileCreateTransaction)
+    assert restored.keys == []
+    assert restored.contents == b""
+    assert restored.file_memo == ""
+    assert restored.expiration_time == tx.expiration_time
+    assert restored._transaction_body_bytes
+
+
+def test_file_create_from_protobuf_unset_optionals(mock_account_ids):
+    """Test FileCreateTransaction._from_protobuf with unset optional fields."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    body = transaction_pb2.TransactionBody(
+        transactionID=tx_id._to_proto(),
+        nodeAccountID=node_account_id._to_proto(),
+        fileCreate=file_create_pb2.FileCreateTransactionBody(),
+    )
+    body_bytes = body.SerializeToString()
+
+    restored = FileCreateTransaction._from_protobuf(body, body_bytes, None)
+
+    assert isinstance(restored, FileCreateTransaction)
+    assert restored.keys == []
+    assert restored.contents == b""
+    assert restored.file_memo == ""
+    assert restored.expiration_time is None
+
+
+def test_file_create_from_protobuf_with_keys(mock_account_ids):
+    """Test FileCreateTransaction._from_protobuf correctly parses diverse key types."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    priv_key = PrivateKey.generate()
+    pub_key = PrivateKey.generate().public_key()
+    key_list = KeyList([PrivateKey.generate(), PrivateKey.generate()], threshold=1)
+
+    body = transaction_pb2.TransactionBody(
+        transactionID=tx_id._to_proto(),
+        nodeAccountID=node_account_id._to_proto(),
+        fileCreate=file_create_pb2.FileCreateTransactionBody(
+            keys=basic_types_pb2.KeyList(keys=[k.to_proto_key() for k in [priv_key, pub_key, key_list]]),
+            contents=b"Some binary file payload",
+            memo="Test memo",
+            expirationTime=Timestamp(1750000000, 0)._to_protobuf(),
+        ),
+    )
+    body_bytes = body.SerializeToString()
+
+    restored = FileCreateTransaction._from_protobuf(body, body_bytes, None)
+
+    assert isinstance(restored, FileCreateTransaction)
+    assert len(restored.keys) == 3
+    assert isinstance(restored.keys[0], PublicKey)
+    assert isinstance(restored.keys[1], PublicKey)
+    assert isinstance(restored.keys[2], KeyList)
+    assert restored.keys[2].threshold == 1
+    assert restored.contents == b"Some binary file payload"
+    assert restored.file_memo == "Test memo"
+    assert restored.expiration_time == Timestamp(1750000000, 0)

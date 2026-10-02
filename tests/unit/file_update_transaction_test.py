@@ -20,7 +20,9 @@ from hiero_sdk_python.hapi.services import (
     response_header_pb2,
     response_pb2,
     transaction_get_receipt_pb2,
+    transaction_pb2,
 )
+from hiero_sdk_python.hapi.services.file_update_pb2 import FileUpdateTransactionBody
 from hiero_sdk_python.hapi.services.schedulable_transaction_body_pb2 import (
     SchedulableTransactionBody,
 )
@@ -33,6 +35,8 @@ from hiero_sdk_python.hapi.services.transaction_response_pb2 import (
 from hiero_sdk_python.hbar import Hbar
 from hiero_sdk_python.response_code import ResponseCode
 from hiero_sdk_python.timestamp import Timestamp
+from hiero_sdk_python.transaction.transaction import Transaction
+from hiero_sdk_python.transaction.transaction_id import TransactionId
 from tests.unit.mock_server import mock_hedera_servers
 
 
@@ -448,3 +452,131 @@ def test_set_contents_accepts_bytearray():
 
     assert file_tx.contents == b"buffered content"
     assert isinstance(file_tx.contents, bytes)
+
+
+def test_file_update_round_trip_from_bytes_all_fields(mock_account_ids, file_id):
+    """Test FileUpdateTransaction to_bytes() and Transaction.from_bytes() round trip with all fields set."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+    public_key = PrivateKey.generate().public_key()
+    expiration_time = Timestamp(1800000000, 123456)
+    contents = b"Updated round trip file contents"
+    file_memo = "Updated round trip memo"
+
+    tx = FileUpdateTransaction(
+        file_id=file_id,
+        keys=[public_key],
+        contents=contents,
+        expiration_time=expiration_time,
+        file_memo=file_memo,
+    )
+    tx.set_transaction_id(tx_id)
+    tx.set_node_account_ids([node_account_id])
+    tx.set_transaction_memo("Base tx update memo")
+
+    tx.freeze()
+    tx_bytes = tx.to_bytes()
+
+    restored = Transaction.from_bytes(tx_bytes)
+
+    assert isinstance(restored, FileUpdateTransaction)
+    assert restored.memo == "Base tx update memo"
+    assert restored.file_id == file_id
+    assert len(restored.keys) == 1
+    assert restored.keys[0].to_proto_key() == public_key.to_proto_key()
+    assert restored.contents == contents
+    assert restored.expiration_time == expiration_time
+    assert restored.file_memo == file_memo
+    assert restored._transaction_body_bytes
+
+
+def test_file_update_round_trip_from_bytes_defaults_unset_optionals(mock_account_ids, file_id):
+    """Test FileUpdateTransaction to_bytes() and Transaction.from_bytes() round trip with unset optional fields."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    tx = FileUpdateTransaction(file_id=file_id)
+    tx.set_transaction_id(tx_id)
+    tx.set_node_account_ids([node_account_id])
+
+    tx.freeze()
+    tx_bytes = tx.to_bytes()
+
+    restored = Transaction.from_bytes(tx_bytes)
+
+    assert isinstance(restored, FileUpdateTransaction)
+    assert restored.file_id == file_id
+    assert restored.keys is None
+    assert restored.contents is None
+    assert restored.expiration_time is None
+    assert restored.file_memo is None
+    assert restored._transaction_body_bytes
+
+
+def test_file_update_round_trip_from_bytes_empty_keys(mock_account_ids, file_id):
+    """Test FileUpdateTransaction to_bytes() and Transaction.from_bytes() round trip preserves explicit empty keys."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    tx = FileUpdateTransaction(file_id=file_id, keys=[])
+    tx.set_transaction_id(tx_id)
+    tx.set_node_account_ids([node_account_id])
+
+    tx.freeze()
+    tx_bytes = tx.to_bytes()
+
+    restored = Transaction.from_bytes(tx_bytes)
+
+    assert isinstance(restored, FileUpdateTransaction)
+    assert restored.file_id == file_id
+    assert restored.keys == []
+    assert restored.keys is not None
+
+
+def test_file_update_from_protobuf_unset_optionals(mock_account_ids):
+    """Test FileUpdateTransaction._from_protobuf with unset optional fields."""
+    operator_id, _, node_account_id, _, _ = mock_account_ids
+    tx_id = TransactionId.generate(operator_id)
+
+    body = transaction_pb2.TransactionBody(
+        transactionID=tx_id._to_proto(),
+        nodeAccountID=node_account_id._to_proto(),
+        fileUpdate=FileUpdateTransactionBody(),
+    )
+    body_bytes = body.SerializeToString()
+
+    restored = FileUpdateTransaction._from_protobuf(body, body_bytes, None)
+
+    assert isinstance(restored, FileUpdateTransaction)
+    assert restored.file_id is None
+    assert restored.keys is None
+    assert restored.contents is None
+    assert restored.expiration_time is None
+    assert restored.file_memo is None
+
+
+def test_file_update_from_proto_method(file_id):
+    """Test FileUpdateTransaction._from_proto method directly."""
+    public_key = PrivateKey.generate().public_key()
+    proto = FileUpdateTransactionBody(
+        fileID=file_id._to_proto(),
+        keys=basic_types_pb2.KeyList(keys=[public_key.to_proto_key()]),
+        contents=b"Direct proto update content",
+        expirationTime=Timestamp(1750000000, 0)._to_protobuf(),
+        memo=StringValue(value="Direct proto update memo"),
+    )
+    tx = FileUpdateTransaction()._from_proto(proto)
+    assert tx.file_id == file_id
+    assert len(tx.keys) == 1
+    assert tx.keys[0].to_proto_key() == public_key.to_proto_key()
+    assert tx.contents == b"Direct proto update content"
+    assert tx.expiration_time == Timestamp(1750000000, 0)
+    assert tx.file_memo == "Direct proto update memo"
+
+    empty_proto = FileUpdateTransactionBody()
+    empty_tx = FileUpdateTransaction()._from_proto(empty_proto)
+    assert empty_tx.file_id is None
+    assert empty_tx.keys is None
+    assert empty_tx.contents is None
+    assert empty_tx.expiration_time is None
+    assert empty_tx.file_memo is None
